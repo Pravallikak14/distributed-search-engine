@@ -155,3 +155,45 @@ Possible future improvements include:
 - Distributed query routing
 - Metrics and tracing
 - Kubernetes deployment
+## Fetcher
+
+The fetcher downloads web pages asynchronously so multiple URLs can be processed at the same time.
+
+### Concurrency
+
+A global semaphore limits the number of active requests to 50.
+
+This prevents too many connections from being opened at once and protects the crawler from resource exhaustion.
+
+### Retries
+
+The fetcher retries temporary failures such as:
+
+- Network errors
+- Timeouts
+- HTTP 429
+- HTTP 5xx
+
+Permanent errors such as HTTP 404 are not retried.
+
+### Exponential Backoff and Jitter
+
+Retries use exponential backoff:
+
+1 second, 2 seconds, 4 seconds, ...
+
+A small random jitter is added to each delay.
+
+Jitter prevents multiple workers from retrying at exactly the same time and sending another burst of requests to the same server.
+
+### Size and Content-Type Limits
+
+Only HTML responses are processed.
+
+The fetcher limits the response body to 2 MB. PDFs, images, and other non-HTML content are skipped.
+
+### Failure Handling
+
+A failed URL returns a FetchResult containing the error instead of crashing the worker.
+
+This allows the crawler to continue processing other URLs.
