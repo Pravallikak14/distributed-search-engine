@@ -197,3 +197,21 @@ The fetcher limits the response body to 2 MB. PDFs, images, and other non-HTML c
 A failed URL returns a FetchResult containing the error instead of crashing the worker.
 
 This allows the crawler to continue processing other URLs.
+## Parser
+
+The parser uses lxml because it is fast and suitable for processing a large
+number of HTML pages.
+
+It extracts the page title, clean text, and absolute HTTP/HTTPS links.
+
+Scripts, styles, noscript, template, SVG, head content, and comments are
+removed so they do not pollute the searchable text.
+
+Relative URLs are converted to absolute URLs using the page URL and any
+<base href> tag.
+
+mailto, javascript, tel, fragment-only links, and nofollow links are skipped.
+Duplicate links are removed while preserving their original order.
+
+Malformed or empty HTML should never crash the crawler. The parser returns an
+empty ParsedPage when parsing fails.
