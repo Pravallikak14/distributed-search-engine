@@ -215,3 +215,31 @@ Duplicate links are removed while preserving their original order.
 
 Malformed or empty HTML should never crash the crawler. The parser returns an
 empty ParsedPage when parsing fails.
+## URL Normalization
+
+The crawler normalizes URLs before adding them to the frontier to reduce duplicate crawling.
+
+Normalization rules:
+
+- HTTP and HTTPS schemes are normalized to lowercase.
+- Hostnames are normalized to lowercase.
+- Default ports are removed (`:80` for HTTP and `:443` for HTTPS).
+- Non-default ports are preserved.
+- Userinfo is removed.
+- Trailing dots in hostnames are removed.
+- International domain names are converted to punycode.
+- URL fragments are removed.
+- Empty paths become `/`.
+- Dot segments such as `.` and `..` are resolved.
+- Path case is preserved.
+- Trailing slashes are preserved, so `/a` and `/a/` remain distinct.
+- Tracking parameters such as `utm_*`, `gclid`, `fbclid`, and similar parameters are removed.
+- Query parameters are sorted while blank values are preserved.
+- Percent encoding is normalized.
+- Only HTTP and HTTPS URLs are accepted.
+- URLs longer than 2048 characters are rejected.
+- Normalization is idempotent, meaning normalizing an already normalized URL produces the same result.
+
+The normalized URL is used for frontier deduplication and prevents the crawler from visiting the same logical URL multiple times due to tracking parameters, fragments, or different URL representations.
+
+Known limitation: `/a` and `/a/` are intentionally kept separate because some servers treat them as different resources. Content-level deduplication can be added later.
