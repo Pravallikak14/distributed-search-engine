@@ -243,3 +243,40 @@ Normalization rules:
 The normalized URL is used for frontier deduplication and prevents the crawler from visiting the same logical URL multiple times due to tracking parameters, fragments, or different URL representations.
 
 Known limitation: `/a` and `/a/` are intentionally kept separate because some servers treat them as different resources. Content-level deduplication can be added later.
+## robots.txt
+
+The crawler respects robots.txt before fetching pages from an origin.
+
+### Rule handling
+
+- A bot-specific `MySearchBot` group is preferred when present.
+- Otherwise the `*` group is used.
+- Rules support `*` wildcards and `$` end anchors.
+- The longest matching rule wins.
+- If matching rules have equal length, `Allow` wins.
+- If no rule matches, the URL is allowed.
+- `Crawl-delay` is parsed and stored for later politeness enforcement.
+
+### Fetch status handling
+
+| robots.txt result | Behavior | TTL |
+|---|---|---:|
+| 2xx | Parse robots.txt rules | 24 hours |
+| 4xx except 429 | Treat as no robots.txt; allow | 24 hours |
+| 429 | Temporarily disallow all | 5 minutes |
+| 5xx | Temporarily disallow all | 5 minutes |
+| Network error / timeout | Temporarily disallow all | 5 minutes |
+
+### Cache and concurrency
+
+Robots rules are cached per origin using:
+
+`scheme://host:port`
+
+Successful responses use a 24-hour TTL. Failure responses use a 5-minute TTL.
+
+Multiple crawler workers requesting robots.txt for the same origin share one in-flight fetch, preventing a thundering-herd of requests.
+
+The crawler uses its own robots.txt parser instead of Python's `urllib.robotparser` because the custom parser supports wildcard and end-anchor rules and implements longest-match precedence.
+
+Crawl-delay is stored by the robots layer and will be enforced by the crawler's politeness mechanism in a later stage.

@@ -5,7 +5,8 @@ from dataclasses import dataclass
 import aiohttp
 
 
-USER_AGENT = "MySearchBot/0.1 (your-email@example.com)"
+BOT_TOKEN = "MySearchBot"
+USER_AGENT = f"{BOT_TOKEN}/0.1 (your-email@example.com)"
 RETRY_STATUS = {429, 500, 502, 503, 504}
 MAX_BYTES = 2_000_000
 
@@ -96,3 +97,24 @@ class Fetcher:
             error=last_error,
             elapsed=loop.time() - start,
         )
+    async def fetch_text(self, url: str, max_bytes: int = 500_000):
+        """Raw fetch for text files such as robots.txt."""
+
+        async with self._sem:
+            try:
+                async with self._session.get(
+                    url,
+                    max_redirects=5
+                ) as resp:
+                    raw = await resp.content.read(max_bytes)
+
+                    return (
+                        resp.status,
+                        raw.decode(
+                            resp.charset or "utf-8",
+                            errors="replace"
+                        )
+                    )
+
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                return None, None
