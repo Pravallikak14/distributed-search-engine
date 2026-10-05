@@ -280,3 +280,94 @@ Multiple crawler workers requesting robots.txt for the same origin share one in-
 The crawler uses its own robots.txt parser instead of Python's `urllib.robotparser` because the custom parser supports wildcard and end-anchor rules and implements longest-match precedence.
 
 Crawl-delay is stored by the robots layer and will be enforced by the crawler's politeness mechanism in a later stage.
+## Frontier & Politeness
+
+The crawler uses an in-memory URL frontier that provides URL deduplication,
+per-host queues, per-host concurrency control, adaptive rate limiting, and
+spider-trap protection.
+
+### Frontier design
+
+URLs are normalized before being added to the frontier. A normalized URL is
+stored in a global `seen` set so equivalent URLs are not crawled twice.
+
+Each host has its own FIFO queue. A host can have at most one request in
+flight at a time.
+
+The frontier maintains a ready-at min-heap:
+
+- Heap key = next allowed fetch time for a host.
+- Idle hosts with queued work are represented in the heap.
+- Busy hosts are not available for another fetch.
+- Workers take the earliest ready host.
+- If the earliest host is still cooling down, the worker waits only until
+  that host becomes ready.
+- Other hosts can continue while a slow host is busy.
+
+This prevents one slow server from occupying all global worker slots.
+
+### Adaptive politeness
+
+After every completed fetch, the next request delay for that host is:
+
+    delay = max(min_delay, robots_crawl_delay, 2 * last_fetch_time)
+
+The delay is capped at 30 seconds.
+
+For example, if a request takes 3 seconds, the adaptive delay becomes
+6 seconds. This makes slow servers naturally receive fewer requests.
+
+A robots.txt Crawl-delay greater than 30 seconds blocks the host. Queued
+URLs for that host are dropped and future URLs for the host are rejected.
+
+### Spider-trap defenses
+
+The frontier limits crawler expansion using:
+
+- Maximum crawl depth: 5
+- Maximum URLs per host: 10,000
+- Maximum URL length: 2,048 characters
+- URL normalization and deduplication
+
+These limits help prevent infinite calendar pages, generated URLs, and other
+crawler traps from consuming the entire crawl budget.
+
+### Termination
+
+The frontier reports completion only when both conditions are true:
+
+- No URLs remain queued.
+- No worker currently has a URL in flight.
+
+This is important because a worker may discover and add new URLs while another
+worker is still processing a page.
+
+### Worker reliability
+
+Every URL obtained from the frontier is released through:
+
+    finally:
+        frontier.done(url, elapsed)
+
+This ensures that an exception during fetching, robots checking, or parsing
+does not permanently leave a host marked as busy.
+
+### Day 6 benchmark
+
+The crawl benchmark uses multiple seed domains and 30 workers.
+
+Observed benchmark:
+
+- Pages crawled: 301
+- Errors: 1
+- Robots blocked: 90
+- Hosts touched: 77
+- Throughput: 5.8 pages/s
+- Minimum gap between requests to the same host: 1.02 seconds
+
+The measured minimum gap is above the configured 1-second minimum, confirming
+that the per-host politeness constraint is enforced.
+
+The benchmark also demonstrates that throughput increases when more hosts are
+available because each host can make progress independently while maintaining
+the one-request-per-host constraint.
