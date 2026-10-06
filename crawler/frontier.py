@@ -16,6 +16,7 @@ class Frontier:
         max_depth: int = 5,
         max_per_host: int = 10_000,
         clock: Callable[[], float] = time.monotonic,
+        seen=None,
     ):
         self.min_delay = min_delay
         self.max_delay = max_delay
@@ -43,7 +44,8 @@ class Frontier:
         self._blocked: set[str] = set()
 
         # Normalized URLs already seen
-        self._seen: set[str] = set()
+        # Day 7: can be a BloomFilter or normal set
+        self._seen = seen if seen is not None else set()
 
         # Number of URLs accepted for each host
         self._host_count: dict[str, int] = defaultdict(int)
@@ -97,7 +99,7 @@ class Frontier:
     def _push(self, host: str) -> None:
         ready = self._ready_at.get(
             host,
-            self._clock()
+            self._clock(),
         )
 
         heapq.heappush(
@@ -217,9 +219,7 @@ class Frontier:
             self.max_delay,
         )
 
-        self._ready_at[host] = (
-            self._clock() + delay
-        )
+        self._ready_at[host] = self._clock() + delay
 
         if self._queues.get(host):
             self._push(host)

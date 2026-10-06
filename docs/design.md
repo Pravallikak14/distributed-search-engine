@@ -371,3 +371,101 @@ that the per-host politeness constraint is enforced.
 The benchmark also demonstrates that throughput increases when more hosts are
 available because each host can make progress independently while maintaining
 the one-request-per-host constraint.
+## Day 7: Dedupe and Persistence
+
+### URL Deduplication
+
+The crawler uses a Bloom filter instead of a Python `set` to track
+previously seen URLs.
+
+The Bloom filter is configured with:
+
+- Capacity: 1,000,000 URLs
+- Target false-positive rate: 1%
+- Hash functions: 7
+- Memory usage: approximately 1.2 MB for 1 million URLs
+
+The Bloom filter uses double hashing with BLAKE2b to generate multiple
+bit positions.
+
+A Bloom filter can have false positives, meaning a new URL may
+occasionally be considered already seen. It does not have false
+negatives.
+
+### Content Deduplication
+
+URL deduplication does not detect two different URLs that contain the
+same page.
+
+For exact content deduplication, the crawler calculates a BLAKE2b-128
+hash of the parsed page text.
+
+If the content hash has already been seen:
+
+1. The page is counted as a duplicate.
+2. The duplicate page is not stored.
+3. Its links are not followed.
+
+Empty page text is not treated as a duplicate.
+
+### Persistent Storage
+
+Crawled pages are stored in SQLite.
+
+The `pages` table stores:
+
+- URL
+- Final URL
+- Page title
+- Gzip-compressed text
+- Gzip-compressed links
+- Content hash
+- Crawl depth
+- Fetch timestamp
+
+SQLite is configured with:
+
+- WAL journal mode
+- NORMAL synchronous mode
+- Batch inserts
+
+Pages are committed in batches instead of committing every page
+individually.
+
+### Compression
+
+Page text and extracted links are compressed using gzip before being
+stored in SQLite.
+
+This reduces disk usage while preserving the original parsed text and
+normalized links.
+
+### Day 7 Benchmark
+
+The crawler successfully completed a large crawl with:
+
+- 10,070 fetched pages
+- 9,392 stored pages
+- 678 duplicate pages
+- 1,073 errors
+- 2,096 robots-blocked URLs
+
+The Bloom filter benchmark showed approximately 95x lower memory usage
+than a Python set for 1 million URLs.
+
+Measured Bloom false-positive rate was approximately 1.006%, close to
+the 1% target.
+
+### Known Limitations
+
+- The Bloom filter is currently in-memory and is not persisted.
+- False-positive probability increases if the configured capacity is
+  exceeded.
+- Content deduplication detects exact duplicates only.
+- SQLite has a single-writer limitation.
+- Gzip compression adds CPU overhead.
+- Raw HTML is not stored.
+- Links from duplicate pages are not followed.
+
+Future improvements include distributed URL state, near-duplicate
+detection, and migration to PostgreSQL for larger-scale persistence.

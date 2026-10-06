@@ -1,0 +1,47 @@
+Distributed Search Engine - Week 1 Benchmark Results
+======================================================
+
+Day 7: Dedupe + Persistence + First Big Run
+
+Test Suite
+----------
+68 tests passed in 0.80s
+
+Bloom Filter Memory Benchmark
+-----------------------------
+URLs: 1,000,000
+Python set memory: 114 MB
+Bloom filter memory: 1.2 MB
+Memory reduction: 95x smaller
+
+Measured false-positive rate: 1.006%
+Target false-positive rate: 1%
+Number of hash functions (k): 7
+
+10K Crawl
+---------
+Fetched pages: 10,070
+Stored pages: 9,392
+Duplicate pages: 678
+Errors: 1,073
+Robots blocked: 2,096
+
+Progress checkpoints:
+15s  - pages=939   stored=913
+30s  - pages=2232  stored=2040
+45s  - pages=3252  stored=3204
+60s  - pages=4554  stored=4246
+75s  - pages=6043  stored=5625
+90s  - pages=7492  stored=6992
+105s - pages=9029  stored=8433
+120s - pages=10070 stored=9392
+
+Notes
+-----
+- Bloom filter successfully replaced the in-memory URL set.
+- Exact duplicate pages were detected using content hashing.
+- Pages were persisted in SQLite.
+- Page text and links were gzip-compressed.
+- HTTP error responses were not counted as successful pages.
+- Robots.txt restrictions were respected.
+- The 10K crawl reached more than 10,000 fetched pages.
