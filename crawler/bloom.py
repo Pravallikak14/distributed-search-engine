@@ -2,6 +2,44 @@ import hashlib
 import math
 
 
+def bloom_params(capacity: int, error_rate: float) -> tuple[int, int]:
+    if capacity <= 0 or not 0 < error_rate < 1:
+        raise ValueError("capacity > 0 and 0 < error_rate < 1 required")
+
+    m = max(
+        8,
+        math.ceil(
+            -capacity * math.log(error_rate) / (math.log(2) ** 2)
+        ),
+    )
+
+    k = max(
+        1,
+        round(m / capacity * math.log(2)),
+    )
+
+    return m, k
+
+
+def bloom_positions(
+    item: str,
+    num_bits: int,
+    num_hashes: int,
+) -> list[int]:
+    d = hashlib.blake2b(
+        item.encode("utf-8"),
+        digest_size=16,
+    ).digest()
+
+    h1 = int.from_bytes(d[:8], "little")
+    h2 = int.from_bytes(d[8:], "little") | 1
+
+    return [
+        (h1 + i * h2) % num_bits
+        for i in range(num_hashes)
+    ]
+
+
 class BloomFilter:
     def __init__(self, capacity: int, error_rate: float = 0.01):
         if capacity <= 0 or not 0 < error_rate < 1:
@@ -10,32 +48,23 @@ class BloomFilter:
         self.capacity = capacity
         self.error_rate = error_rate
 
-        self.num_bits = max(
-            8,
-            math.ceil(
-                -capacity * math.log(error_rate) / (math.log(2) ** 2)
-            ),
+        self.num_bits, self.num_hashes = bloom_params(
+            capacity,
+            error_rate,
         )
 
-        self.num_hashes = max(
-            1,
-            round(self.num_bits / capacity * math.log(2)),
+        self._bits = bytearray(
+            (self.num_bits + 7) // 8
         )
 
-        self._bits = bytearray((self.num_bits + 7) // 8)
         self._count = 0
 
     def _positions(self, item: str):
-        d = hashlib.blake2b(
-            item.encode("utf-8"),
-            digest_size=16,
-        ).digest()
-
-        h1 = int.from_bytes(d[:8], "little")
-        h2 = int.from_bytes(d[8:], "little") | 1
-
-        for i in range(self.num_hashes):
-            yield (h1 + i * h2) % self.num_bits
+        return bloom_positions(
+            item,
+            self.num_bits,
+            self.num_hashes,
+        )
 
     def add(self, item: str) -> bool:
         """Returns True if item was definitely new, False if probably seen."""
