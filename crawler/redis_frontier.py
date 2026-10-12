@@ -322,20 +322,23 @@ class RedisFrontier:
             None,
         )
 
-    async def get(self):
-        """
-        Wait until a URL is ready.
-        None when crawl finished.
-        """
-
+    async def get(self, stop=None):
+        """Wait for a URL; stop taking new URLs during shutdown."""
         while True:
+            if stop is not None and stop.is_set():
+                return None
 
             item, wait = await self.poll()
 
             if item is not None:
+                if stop is not None and stop.is_set():
+                    return None
                 return item
 
             if await self.finished():
+                return None
+
+            if stop is not None and stop.is_set():
                 return None
 
             delay = (
@@ -343,10 +346,7 @@ class RedisFrontier:
                 if wait is not None
                 else self._idle_poll
             )
-
             delay += random.random() * 0.02
-
-            # jitter: workers sync avvakunda
             self._changed.clear()
 
             try:
