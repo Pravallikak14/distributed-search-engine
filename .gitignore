@@ -4,3 +4,4 @@ __pycache__/
 data/
 .pytest_cache/
 .env
+crawler/redis_frontier_day8_backup.py

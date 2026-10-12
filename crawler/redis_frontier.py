@@ -15,165 +15,83 @@ local p, host = ARGV[1], ARGV[2]
 if redis.call('SISMEMBER', p..'blocked', host) == 1 then return 0 end
 local cnt = tonumber(redis.call('HGET', p..'hcount', host) or '0')
 if cnt >= tonumber(ARGV[5]) then return 0 end
-
 local fresh = 0
 for i = 6, #ARGV do
-  if redis.call('SETBIT', p..'bloom', ARGV[i], 1) == 0 then
-    fresh = 1
-  end
+  if redis.call('SETBIT', p..'bloom', ARGV[i], 1) == 0 then fresh = 1 end
 end
-
 if fresh == 0 then return 0 end
-
 redis.call('HINCRBY', p..'hcount', host, 1)
-
-local len = redis.call(
-  'RPUSH',
-  p..'q:'..host,
-  ARGV[3]..' '..ARGV[4]
-)
-
+local seq = redis.call('INCR', p..'seq')
+local score = tonumber(ARGV[3]) * 10000000000 + seq
+redis.call('ZADD', p..'q:'..host, score, ARGV[3]..' '..ARGV[4])
+local len = redis.call('ZCARD', p..'q:'..host)
 redis.call('INCR', p..'queued')
-
 if len == 1 and redis.call('HEXISTS', p..'busy', host) == 0 then
   local t = redis.call('TIME')
   local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
   local ra = tonumber(redis.call('HGET', p..'next', host) or '0')
   redis.call('ZADD', p..'ready', math.max(now, ra), host)
 end
-
 return 1
 """
 
-
 # ARGV: prefix
-# Returns {1,host,item} | {2,wait} | {0} nothing | {4} stopped
 POLL = """
 local p = ARGV[1]
-
-if redis.call('EXISTS', p..'stopped') == 1 then
-  return {4}
-end
-
+if redis.call('EXISTS', p..'stopped') == 1 then return {4} end
 local t = redis.call('TIME')
 local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-
 for _ = 1, 100 do
-  local top = redis.call(
-    'ZRANGE',
-    p..'ready',
-    0,
-    0,
-    'WITHSCORES'
-  )
-
-  if #top == 0 then
-    return {0}
-  end
-
+  local top = redis.call('ZRANGE', p..'ready', 0, 0, 'WITHSCORES')
+  if #top == 0 then return {0} end
   local host, score = top[1], tonumber(top[2])
-
-  if score > now then
-    return {2, tostring(score - now)}
-  end
-
+  if score > now then return {2, tostring(score - now)} end
   redis.call('ZREM', p..'ready', host)
-
-  local item = redis.call('LPOP', p..'q:'..host)
-
-  if item then
+  local popped = redis.call('ZPOPMIN', p..'q:'..host, 1)
+  if #popped > 0 then
+    local item = popped[1]
     redis.call('DECR', p..'queued')
     redis.call('HSET', p..'busy', host, item)
-
     return {1, host, item}
   end
 end
-
 return {0}
 """
-
 
 # ARGV: prefix, host, elapsed, min_delay, max_delay
 DONE = """
 local p, host = ARGV[1], ARGV[2]
-
-if redis.call('HDEL', p..'busy', host) == 0 then
-  return 0
-end
-
+if redis.call('HDEL', p..'busy', host) == 0 then return 0 end
 local elapsed = tonumber(ARGV[3])
 local min_d = tonumber(ARGV[4])
 local max_d = tonumber(ARGV[5])
-
-local rd = tonumber(
-  redis.call('HGET', p..'rdelay', host) or '0'
-)
-
-local delay = math.min(
-  math.max(min_d, rd, 2 * elapsed),
-  max_d
-)
-
+local rd = tonumber(redis.call('HGET', p..'rdelay', host) or '0')
+local delay = math.min(math.max(min_d, rd, 2 * elapsed), max_d)
 local t = redis.call('TIME')
-
-local ra =
-  tonumber(t[1])
-  + tonumber(t[2]) / 1000000
-  + delay
-
-redis.call(
-  'HSET',
-  p..'next',
-  host,
-  string.format('%.6f', ra)
-)
-
-if redis.call('LLEN', p..'q:'..host) > 0 then
+local ra = tonumber(t[1]) + tonumber(t[2]) / 1000000 + delay
+redis.call('HSET', p..'next', host, string.format('%.6f', ra))
+if redis.call('ZCARD', p..'q:'..host) > 0 then
   redis.call('ZADD', p..'ready', ra, host)
 end
-
 return 1
 """
 
-
 # ARGV: prefix, host, delay, max_delay
 SET_DELAY = """
-local p, host, delay, max_d =
-  ARGV[1],
-  ARGV[2],
-  tonumber(ARGV[3]),
-  tonumber(ARGV[4])
-
+local p, host, delay, max_d = ARGV[1], ARGV[2], tonumber(ARGV[3]), tonumber(ARGV[4])
 if delay > max_d then
-
   redis.call('SADD', p..'blocked', host)
-
-  local n = redis.call(
-    'LLEN',
-    p..'q:'..host
-  )
-
+  local n = redis.call('ZCARD', p..'q:'..host)
   if n > 0 then
     redis.call('DEL', p..'q:'..host)
     redis.call('DECRBY', p..'queued', n)
   end
-
   redis.call('ZREM', p..'ready', host)
-
 else
-
-  redis.call(
-    'HSET',
-    p..'rdelay',
-    host,
-    ARGV[3]
-  )
-
+  redis.call('HSET', p..'rdelay', host, ARGV[3])
 end
-
 return 1
 """
-
 
 SCRIPTS = {
     "add": ADD,
@@ -181,6 +99,7 @@ SCRIPTS = {
     "done": DONE,
     "set_delay": SET_DELAY,
 }
+
 
 
 class RedisFrontier:
